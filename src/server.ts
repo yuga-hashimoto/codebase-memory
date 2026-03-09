@@ -27,7 +27,7 @@ export function createServer(config: ServerConfig): Server {
     tools: [
       {
         name: 'remember',
-        description: 'Store a new memory about the codebase \u2014 architecture decisions, patterns, conventions, bugs, or context. The AI agent calls this to save knowledge for future sessions.',
+        description: 'Store a new memory about the codebase — architecture decisions, patterns, conventions, bugs, or context. The AI agent calls this to save knowledge for future sessions.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -86,7 +86,7 @@ export function createServer(config: ServerConfig): Server {
       },
       {
         name: 'project_summary',
-        description: 'Get an overview of all stored memories \u2014 counts by category, top tags, recent updates, and high-importance entries. Call this at the start of a session to load context.',
+        description: 'Get an overview of all stored memories — counts by category, top tags, recent updates, and high-importance entries. Call this at the start of a session to load context.',
         inputSchema: {
           type: 'object' as const,
           properties: {},
