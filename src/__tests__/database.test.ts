@@ -1,0 +1,178 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { MemoryDatabase } from '../database.js';
+import { unlinkSync, existsSync } from 'node:fs';
+
+const TEST_DB = ':memory:';
+
+describe('MemoryDatabase', () => {
+  let db: MemoryDatabase;
+
+  beforeEach(() => {
+    db = new MemoryDatabase({ path: TEST_DB, walMode: false });
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  describe('create', () => {
+    it('should create a memory entry', () => {
+      const entry = db.create({
+        category: 'architecture',
+        title: 'API uses REST',
+        content: 'The backend API follows REST conventions with JSON responses.',
+      });
+
+      expect(entry.id).toBeDefined();
+      expect(entry.category).toBe('architecture');
+      expect(entry.title).toBe('API uses REST');
+      expect(entry.content).toContain('REST conventions');
+      expect(entry.tags).toEqual([]);
+      expect(entry.filePaths).toEqual([]);
+      expect(entry.importance).toBe(5);
+      expect(entry.source).toBe('user');
+      expect(entry.accessCount).toBe(0);
+    });
+
+    it('should create with tags and file paths', () => {
+      const entry = db.create({
+        category: 'pattern',
+        title: 'Repository pattern',
+        content: 'All data access goes through repository classes.',
+        tags: ['backend', 'database'],
+        filePaths: ['src/repositories/'],
+        importance: 8,
+      });
+
+      expect(entry.tags).toEqual(['backend', 'database']);
+      expect(entry.filePaths).toEqual(['src/repositories/']);
+      expect(entry.importance).toBe(8);
+    });
+
+    it('should clamp importance to 1-10', () => {
+      const low = db.create({ category: 'context', title: 'Low', content: 'Test', importance: -5 });
+      const high = db.create({ category: 'context', title: 'High', content: 'Test', importance: 99 });
+
+      expect(low.importance).toBe(1);
+      expect(high.importance).toBe(10);
+    });
+  });
+
+  describe('getById', () => {
+    it('should retrieve a memory by ID', () => {
+      const created = db.create({ category: 'decision', title: 'Use TypeScript', content: 'Chose TS for type safety.' });
+      const found = db.getById(created.id);
+
+      expect(found).not.toBeNull();
+      expect(found!.title).toBe('Use TypeScript');
+    });
+
+    it('should increment access count', () => {
+      const created = db.create({ category: 'context', title: 'Test', content: 'Test' });
+      db.getById(created.id);
+      db.getById(created.id);
+      const found = db.getById(created.id);
+
+      expect(found!.accessCount).toBe(3);
+    });
+
+    it('should return null for non-existent ID', () => {
+      expect(db.getById('non-existent')).toBeNull();
+    });
+  });
+
+  describe('update', () => {
+    it('should update memory fields', () => {
+      const created = db.create({ category: 'bug', title: 'Old title', content: 'Old content' });
+      const updated = db.update({ id: created.id, title: 'New title', content: 'New content', importance: 9 });
+
+      expect(updated!.title).toBe('New title');
+      expect(updated!.content).toBe('New content');
+      expect(updated!.importance).toBe(9);
+    });
+
+    it('should return null for non-existent ID', () => {
+      expect(db.update({ id: 'non-existent', title: 'X' })).toBeNull();
+    });
+  });
+
+  describe('delete', () => {
+    it('should delete a memory', () => {
+      const created = db.create({ category: 'todo', title: 'Remove later', content: 'Temp' });
+      expect(db.delete(created.id)).toBe(true);
+      expect(db.getById(created.id)).toBeNull();
+    });
+
+    it('should return false for non-existent ID', () => {
+      expect(db.delete('non-existent')).toBe(false);
+    });
+  });
+
+  describe('query', () => {
+    beforeEach(() => {
+      db.create({ category: 'architecture', title: 'Microservices', content: 'System uses microservices architecture with Docker.', tags: ['docker', 'backend'], importance: 9 });
+      db.create({ category: 'pattern', title: 'Singleton pattern', content: 'Database connection uses singleton pattern.', tags: ['backend', 'database'], importance: 7 });
+      db.create({ category: 'convention', title: 'Naming convention', content: 'Use camelCase for variables, PascalCase for classes.', tags: ['style'], importance: 5 });
+      db.create({ category: 'bug', title: 'Memory leak', content: 'Event listeners not cleaned up in useEffect.', tags: ['frontend', 'react'], filePaths: ['src/hooks/useData.ts'], importance: 8 });
+    });
+
+    it('should search by query (full-text)', () => {
+      const results = db.query({ query: 'microservices' });
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].title).toBe('Microservices');
+    });
+
+    it('should filter by category', () => {
+      const results = db.query({ category: 'bug' });
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('Memory leak');
+    });
+
+    it('should filter by minimum importance', () => {
+      const results = db.query({ minImportance: 8 });
+      expect(results.length).toBe(2);
+      results.forEach(r => expect(r.importance).toBeGreaterThanOrEqual(8));
+    });
+
+    it('should filter by file path', () => {
+      const results = db.query({ filePath: 'src/hooks' });
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('Memory leak');
+    });
+
+    it('should filter by tags', () => {
+      const results = db.query({ tags: ['backend'] });
+      expect(results.length).toBe(2);
+    });
+
+    it('should respect limit', () => {
+      const results = db.query({ limit: 2 });
+      expect(results).toHaveLength(2);
+    });
+
+    it('should return all with no filters', () => {
+      const results = db.query({});
+      expect(results).toHaveLength(4);
+    });
+  });
+
+  describe('getSummary', () => {
+    it('should return project summary', () => {
+      db.create({ category: 'architecture', title: 'T1', content: 'C1', tags: ['a', 'b'] });
+      db.create({ category: 'architecture', title: 'T2', content: 'C2', tags: ['a'] });
+      db.create({ category: 'bug', title: 'T3', content: 'C3', tags: ['b', 'c'] });
+
+      const summary = db.getSummary();
+      expect(summary.totalMemories).toBe(3);
+      expect(summary.byCategory.architecture).toBe(2);
+      expect(summary.byCategory.bug).toBe(1);
+      expect(summary.topTags[0].tag).toBe('a');
+      expect(summary.topTags[0].count).toBe(2);
+    });
+
+    it('should handle empty database', () => {
+      const summary = db.getSummary();
+      expect(summary.totalMemories).toBe(0);
+    });
+  });
+});
