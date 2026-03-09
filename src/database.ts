@@ -90,12 +90,13 @@ export class MemoryDatabase {
     return this.getById(id)!;
   }
 
-  getById(id: string): MemoryEntry | null {
+  getById(id: string, incrementAccess = false): MemoryEntry | null {
     const row = this.db.prepare('SELECT * FROM memories WHERE id = ?').get(id) as any;
     if (!row) return null;
 
-    // Increment access count
-    this.db.prepare('UPDATE memories SET access_count = access_count + 1 WHERE id = ?').run(id);
+    if (incrementAccess) {
+      this.db.prepare('UPDATE memories SET access_count = access_count + 1 WHERE id = ?').run(id);
+    }
 
     return this.rowToEntry(row);
   }
@@ -136,7 +137,7 @@ export class MemoryDatabase {
 
     // Full-text search
     if (options.query) {
-      const ftsQuery = options.query.split(/\s+/).map(w => `"${w}"`).join(' OR ');
+      const ftsQuery = options.query.split(/\s+/).map(w => `"${w.replace(/"/g, '""')}"`).join(' OR ');
       let sql = `
         SELECT m.*, rank
         FROM memories m
