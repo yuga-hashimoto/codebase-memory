@@ -67,10 +67,20 @@ describe('MemoryDatabase', () => {
       expect(found!.title).toBe('Use TypeScript');
     });
 
-    it('should increment access count', () => {
+    it('should not increment access count by default', () => {
       const created = db.create({ category: 'context', title: 'Test', content: 'Test' });
       db.getById(created.id);
       db.getById(created.id);
+      const found = db.getById(created.id);
+
+      expect(found!.accessCount).toBe(0);
+    });
+
+    it('should increment access count when incrementAccess=true', () => {
+      const created = db.create({ category: 'context', title: 'Test', content: 'Test' });
+      db.getById(created.id, true);
+      db.getById(created.id, true);
+      db.getById(created.id, true);
       const found = db.getById(created.id);
 
       expect(found!.accessCount).toBe(3);
@@ -173,6 +183,91 @@ describe('MemoryDatabase', () => {
     it('should handle empty database', () => {
       const summary = db.getSummary();
       expect(summary.totalMemories).toBe(0);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle FTS query with special characters', () => {
+      db.create({ category: 'context', title: 'Double quotes', content: 'This has "quoted" text inside.' });
+      // Should not throw even with quotes in query
+      const results = db.query({ query: '"quoted"' });
+      expect(results).toBeDefined();
+    });
+
+    it('should handle FTS query with single word', () => {
+      db.create({ category: 'architecture', title: 'REST API', content: 'Uses REST with express.' });
+      const results = db.query({ query: 'REST' });
+      expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('should handle combined FTS query with category filter', () => {
+      db.create({ category: 'architecture', title: 'REST API', content: 'REST endpoint design.' });
+      db.create({ category: 'bug', title: 'REST bug', content: 'REST endpoint fails.' });
+      const results = db.query({ query: 'REST', category: 'bug' });
+      expect(results).toHaveLength(1);
+      expect(results[0].category).toBe('bug');
+    });
+
+    it('should handle combined FTS query with minImportance filter', () => {
+      db.create({ category: 'pattern', title: 'Singleton', content: 'Singleton pattern used.', importance: 3 });
+      db.create({ category: 'pattern', title: 'Factory', content: 'Factory pattern used.', importance: 9 });
+      const results = db.query({ query: 'pattern', minImportance: 8 });
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('Factory');
+    });
+
+    it('should handle update with no changes', () => {
+      const created = db.create({ category: 'context', title: 'No change', content: 'Same' });
+      const updated = db.update({ id: created.id });
+      expect(updated).not.toBeNull();
+      expect(updated!.title).toBe('No change');
+    });
+
+    it('should update tags correctly', () => {
+      const created = db.create({ category: 'context', title: 'Tagged', content: 'C', tags: ['old'] });
+      const updated = db.update({ id: created.id, tags: ['new1', 'new2'] });
+      expect(updated!.tags).toEqual(['new1', 'new2']);
+    });
+
+    it('should update filePaths correctly', () => {
+      const created = db.create({ category: 'context', title: 'With paths', content: 'C', filePaths: ['src/old.ts'] });
+      const updated = db.update({ id: created.id, filePaths: ['src/new.ts', 'lib/util.ts'] });
+      expect(updated!.filePaths).toEqual(['src/new.ts', 'lib/util.ts']);
+    });
+
+    it('should clamp importance on update', () => {
+      const created = db.create({ category: 'context', title: 'Clamp', content: 'C' });
+      const updated = db.update({ id: created.id, importance: 999 });
+      expect(updated!.importance).toBe(10);
+    });
+
+    it('should handle offset in query', () => {
+      for (let i = 0; i < 5; i++) {
+        db.create({ category: 'context', title: `Item ${i}`, content: `Content ${i}` });
+      }
+      const page1 = db.query({ limit: 2, offset: 0 });
+      const page2 = db.query({ limit: 2, offset: 2 });
+      expect(page1).toHaveLength(2);
+      expect(page2).toHaveLength(2);
+      expect(page1[0].id).not.toBe(page2[0].id);
+    });
+
+    it('should sort by importance', () => {
+      db.create({ category: 'context', title: 'Low', content: 'C', importance: 2 });
+      db.create({ category: 'context', title: 'High', content: 'C', importance: 9 });
+      db.create({ category: 'context', title: 'Mid', content: 'C', importance: 5 });
+      const results = db.query({ sortBy: 'importance' });
+      expect(results[0].importance).toBeGreaterThanOrEqual(results[1].importance);
+      expect(results[1].importance).toBeGreaterThanOrEqual(results[2].importance);
+    });
+
+    it('should enforce max limit of 100', () => {
+      for (let i = 0; i < 5; i++) {
+        db.create({ category: 'context', title: `Item ${i}`, content: `Content ${i}` });
+      }
+      const results = db.query({ limit: 999 });
+      // Should not crash; max is 100 but we only have 5
+      expect(results).toHaveLength(5);
     });
   });
 });
